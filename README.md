@@ -1,24 +1,43 @@
-He aqui los comandos posibles:
+# Description  
+This is an OpenGL program for visualizing fractal sets using the GPU. A demo and a brief description are available in Spanish in the attached video.  
 
-tecla        |   resultado
----------------------
-z            | zoom in
-x            | zoom out
-right_arrow  | mueve a la derecha
-left_arrow   | mueve a la izquierda
-up_arrow     | mueve hacia arriba
-down_arrow   | mueve hacia abajo
-1            | set 1*
-2            | set 2*
-3            | set 3*
-4            | set 4*
-ESC          | exit/quit
+# Available Commands  
+Once you run the program with:  
+```sh
+./main
+```
 
-*Todos los set estan descritos por _z_{n+1} = f(z_n)
-- set 1: set de Mandelbrot f(z) = z_n^2 + c
-- set 2: f(z) = exp(z) - 0.65
-- set 3: f(z) = z^2 + 0.279           
-- set 4: f(z) = c * exp(z)
+## key Bindings
 
-El programa se compila con el makefile
+| Tecla        | Resultado             |
+|-------------|----------------------|
+| `z`         | Zoom in              |
+| `x`         | Zoom out             |
+| `→` (right_arrow)  | Move to the right  |
+| `←` (left_arrow)   | Move to the left |
+| `↑` (up_arrow)     | Move upward  |
+| `↓` (down_arrow)   | Move downward   |
+| `1`         | Set 1*               |
+| `2`         | Set 2*               |
+| `3`         | Set 3*               |
+| `4`         | Set 4*               |
+| `ESC`       | Exit/Quit            |
 
+\* All the fractal sets are descrived by the equation _z<sub>n+1</sub> = f(z<sub>n</sub>)_
+
+### Fractal sets shown:
+- **Set 1:** Conjunto de Mandelbrot, \( f(z) = z_n^2 + c \)
+- **Set 2:** \( f(z) = \exp(z) - 0.65 \)
+- **Set 3:** \( f(z) = z^2 + 0.279 \)
+- **Set 4:** \( f(z) = c \cdot \exp(z) \)
+
+## Compilation
+
+To compile the program, use:
+```
+make
+```
+To clean previous compilations, use:
+```
+make clean
+```
