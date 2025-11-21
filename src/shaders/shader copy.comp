@@ -1,0 +1,177 @@
+#version 430 core
+#extension GL_ARB_gpu_shader_fp64 : enable
+
+layout (local_size_x = 16, local_size_y = 16) in;
+
+// Output
+layout (binding = 0, rgba32f) uniform writeonly image2D outImage;
+
+// Uniforms
+uniform dvec2 center;
+uniform double zoom;
+uniform int option;
+uniform int maxIterations;
+uniform ivec2 resolution;
+
+// ===============================
+// Double Mandelbrot
+// ===============================
+int computeDoubleMandelbrot(double cr, double ci, int maxI)
+{
+    double zr = 0.0, zi = 0.0;
+    int iter = 0;
+
+    while (iter < maxI) {
+        double tmp = zr;
+        zr = zr*zr - zi*zi + cr;
+        zi = 2.0 * tmp * zi + ci;
+
+        if (zr*zr + zi*zi > 4.0) break;
+        iter++;
+    }
+    return iter;
+}
+
+// ===============================
+// Double Julia
+// ===============================
+int computeDoubleJulia(double zr, double zi, double cr, double ci, int maxI)
+{
+    int iter = 0;
+    while (iter < maxI) {
+        double tmp = zr;
+        zr = zr*zr - zi*zi + cr;
+        zi = 2.0 * tmp * zi + ci;
+
+        if (zr*zr + zi*zi > 4.0) break;
+        iter++;
+    }
+    return iter;
+}
+
+// ===============================
+// Float exp fractal
+// ===============================
+int computeFloatExpVariant(float r, float i, int maxI)
+{
+    int iter = 0;
+    float zr = r, zi = i;
+
+    while (iter < maxI) {
+        float tmp = zr;
+        zr = exp(zr) * cos(zi) - 0.65;
+        zi = exp(tmp) * sin(zi);
+
+        if (log(zr*zr + zi*zi) > 8.0) break;
+        iter++;
+    }
+    return iter;
+}
+
+// ===============================
+// Float exp Julia
+// ===============================
+int computeFloatExpJulia(float cr, float ci, int maxI)
+{
+    float zr = 0.0, zi = 0.0;
+    int iter = 0;
+
+    while (iter < maxI) {
+        float tmp = zr;
+
+        zr = exp(zr) * (cr*cos(zi) - ci*sin(zi));
+        zi = exp(tmp) * (cr*sin(zi) + ci*cos(zi));
+
+        if (log(zr*zr + zi*zi) > 8.0) break;
+        iter++;
+    }
+    return iter;
+}
+
+// ===============================
+// Smooth escape — *must* be float
+// ===============================
+float smoothEscape(int iter, double zr, double zi)
+{
+    float fr = float(zr);
+    float fi = float(zi);
+    float mag2 = fr*fr + fi*fi;
+
+    if (mag2 < 1e-12)
+        mag2 = 1e-12;
+
+    return float(iter) + 1.0 - log(log(sqrt(mag2))) / log(2.0);
+}
+
+// ===============================
+// Dispatcher
+// ===============================
+int fractalIterations(int op, double real, double imag,
+                      out double zrOut, out double ziOut)
+{
+    zrOut = real;
+    ziOut = imag;
+
+    if (op == 1) {
+        int i = computeDoubleMandelbrot(real, imag, maxIterations);
+        return i;
+
+    } else if (op == 2) {
+        return computeFloatExpVariant(float(real), float(imag), maxIterations);
+
+    } else if (op == 3) {
+        double cr = 0.279;
+        double ci = 0.0;
+        return computeDoubleJulia(real, imag, cr, ci, maxIterations);
+
+    } else {
+        return computeFloatExpJulia(float(real), float(imag), maxIterations);
+    }
+}
+
+void main()
+{
+    ivec2 gid = ivec2(gl_GlobalInvocationID.xy);
+    if (gid.x >= resolution.x || gid.y >= resolution.y) return;
+
+    double fx = double(gid.x) / double(resolution.x) - 0.5;
+    double fy = double(gid.y) / double(resolution.y) - 0.5;
+
+    double real = (fx * zoom + center.x) * 5.0;
+    double imag = (fy * zoom + center.y) * 5.0;
+
+    double zr = 0.0, zi = 0.0;
+    int iter = fractalIterations(option, real, imag, zr, zi);
+
+    // ===============================
+    // Color Palette (your style)
+    // ===============================
+    vec4 color;
+
+    if (iter >= maxIterations) {
+        // Interior → black
+        color = vec4(0.0, 0.0, 0.0, 1.0);
+
+    } else {
+
+        float maxa = 50.0;   // default safety value
+
+        if (option == 1) maxa = 160.0;
+        if (option == 2) maxa = 20.0;
+        if (option == 3) maxa = 40.0;   
+        if (option == 4) maxa = 20.0;
+
+        float ita = float(iter) / maxa;
+
+        if (float(iter) < maxa) {
+            // green tone
+            color = vec4(0.0, ita, 0.0, 1.0);
+        } else {
+            // fallback teal color
+            color = vec4(0.1, 0.4, 0.4, 1.0);
+        }
+    }
+
+    imageStore(outImage, gid, color);
+}
+
