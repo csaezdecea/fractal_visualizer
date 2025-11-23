@@ -1,0 +1,3 @@
+/home/cristian/work/Github/fractal_visualizer/build/CMakeFiles/fractal_app.dir
+/home/cristian/work/Github/fractal_visualizer/build/CMakeFiles/edit_cache.dir
+/home/cristian/work/Github/fractal_visualizer/build/CMakeFiles/rebuild_cache.dir

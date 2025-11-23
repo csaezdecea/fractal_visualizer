@@ -1,0 +1,220 @@
+#version 430 core
+#extension GL_ARB_gpu_shader_fp64 : enable
+
+layout (local_size_x = 16, local_size_y = 16) in;
+
+// Output
+layout (binding = 0, rgba32f) uniform writeonly image2D outImage;
+
+// Uniforms
+uniform dvec2 center;
+uniform double zoom;
+uniform int option;
+uniform int maxIterations;
+uniform ivec2 resolution;
+
+// ===============================
+// Double Mandelbrot
+// ===============================
+int computeDoubleMandelbrot(double cr, double ci, int maxI)
+{
+    double zr = 0.0, zi = 0.0;
+    int iter = 0;
+
+    while (iter < maxI) {
+        double tmp = zr;
+        zr = zr*zr - zi*zi + cr;
+        zi = 2.0 * tmp * zi + ci;
+
+        if (zr*zr + zi*zi > 4.0) break;
+        iter++;
+    }
+    return iter;
+}
+
+// ===============================
+// Double Julia
+// ===============================
+int computeDoubleJulia(double zr, double zi, double cr, double ci, int maxI)
+{
+    int iter = 0;
+    while (iter < maxI) {
+        double tmp = zr;
+        zr = zr*zr - zi*zi + cr;
+        zi = 2.0 * tmp * zi + ci;
+
+        if (zr*zr + zi*zi > 4.0) break;
+        iter++;
+    }
+    return iter;
+}
+
+// ===============================
+// Float exp fractal
+// ===============================
+int computeFloatExpVariant(float r, float i, int maxI)
+{
+    int iter = 0;
+    float zr = r, zi = i;
+
+    while (iter < maxI) {
+        float tmp = zr;
+        zr = exp(zr) * cos(zi) - 0.65;
+        zi = exp(tmp) * sin(zi);
+
+        if (log(zr*zr + zi*zi) > 8.0) break;
+        iter++;
+    }
+    return iter;
+}
+
+// ===============================
+// Float exp Julia
+// ===============================
+int computeFloatExpJulia(float cr, float ci, int maxI)
+{
+    float zr = 0.0, zi = 0.0;
+    int iter = 0;
+
+    while (iter < maxI) {
+        float tmp = zr;
+
+        zr = exp(zr) * (cr*cos(zi) - ci*sin(zi));
+        zi = exp(tmp) * (cr*sin(zi) + ci*cos(zi));
+
+        if (log(zr*zr + zi*zi) > 8.0) break;
+        iter++;
+    }
+    return iter;
+}
+
+// ===============================
+// Smooth escape — *must* be float
+// ===============================
+float smoothEscape(int iter, double zr, double zi)
+{
+    if (iter < 100) return float(iter);
+    // compute magnitude using double (this is supported)
+    double mag2 = zr * zr + zi * zi;
+
+    if (mag2 < 1e-12)
+        mag2 = 1e-12;
+
+    double mag = sqrt(mag2);   // this part is allowed on your GPU
+
+    // convert to float for log()
+    float fm = float(mag);
+
+    // avoid log(log(...)) problems
+    fm = max(fm, 1.000001);
+
+    // smooth iteration formula using *float* logs
+    float smoothVar = float(iter) + 1.0 - log(log(fm)) / log(2.0);
+    return smoothVar;
+}
+
+// ===============================
+// Dispatcher — UPDATED (minimal changes)
+// ===============================
+int fractalIterations(int op, double real, double imag,
+                      out double zrOut, out double ziOut)
+{
+    // ---- Mandelbrot (sharp coloring fix) ----
+    if (op == 1) {
+        int it = computeDoubleMandelbrot(real, imag, maxIterations);
+
+        // Recover last (zr, zi)
+        double zr = 0.0, zi = 0.0;
+        for (int k = 0; k < it; k++) {
+            double tmp = zr;
+            zr = zr*zr - zi*zi + real;
+            zi = 2.0 * tmp * zi + imag;
+        }
+
+        zrOut = zr;
+        ziOut = zi;
+        return it;
+    }
+
+    // ---- Float exp variant ----
+    if (op == 2) {
+        zrOut = real;
+        ziOut = imag;
+        return computeFloatExpVariant(float(real), float(imag), maxIterations);
+    }
+
+    // ---- Julia (double) ----
+    if (op == 3) {
+        double cr = 0.279;
+        double ci = 0.0;
+
+        int it = computeDoubleJulia(real, imag, cr, ci, maxIterations);
+
+        // Recover last (zr, zi)
+        double zr = real, zi = imag;
+        for (int k = 0; k < it; k++) {
+            double tmp = zr;
+            zr = zr*zr - zi*zi + cr;
+            zi = 2.0 * tmp * zi + ci;
+        }
+
+        zrOut = zr;
+        ziOut = zi;
+        return it;
+    }
+
+    // ---- Float exp Julia ----
+    zrOut = real;
+    ziOut = imag;
+    return computeFloatExpJulia(float(real), float(imag), maxIterations);
+}
+
+void main()
+{
+    ivec2 gid = ivec2(gl_GlobalInvocationID.xy);
+    if (gid.x >= resolution.x || gid.y >= resolution.y) return;
+
+    double fx = double(gid.x) / double(resolution.x) - 0.5;
+    double fy = double(gid.y) / double(resolution.y) - 0.5;
+
+    double real = (fx * zoom + center.x) * 5.0;
+    double imag = (fy * zoom + center.y) * 5.0;
+
+    double zr = 0.0, zi = 0.0;
+    int iter = fractalIterations(option, real, imag, zr, zi);
+
+    // ===============================
+    // Color Palette (minimal change)
+    // ===============================
+    vec4 color;
+
+    if (iter >= maxIterations) {
+        color = vec4(0.0, 0.0, 0.0, 1.0);   // black interior
+    } else {
+
+        float maxa = 50.0;
+
+        if (option == 1) maxa = 100.0;
+        if (option == 2) maxa = 10.0;
+        if (option == 3) maxa = 20.0;
+        if (option == 4) maxa = 10.0;
+
+        // ---- Smooth sharp step (UPDATED) ----
+        float trueit = smoothEscape(iter, zr, zi);
+        //trueit = iter;
+
+
+        if (trueit < maxa) {
+            float ita = trueit / maxa;
+            color = vec4(0.0, ita, 0.0, 1.0);   // green
+        } else if (trueit < 3*maxa) {
+            float ita = (trueit-maxa)/(2*maxa);
+            color = vec4(0.0, 0.4*ita, ita, 1.0);  //  blue
+        } else {
+            color = vec4(0.5, 0.5, 0.5, 1.0);   // gray
+            //color = vec4(0.0, 0.0, 0.0, 1.0);
+        }
+    }
+
+    imageStore(outImage, gid, color);
+}
